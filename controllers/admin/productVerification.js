@@ -4,7 +4,7 @@ const { apiResponse } = require("../../utils/apiResponse");
 exports.verifyProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const { approvalStatus } = req.body;
+    const { approvalStatus, minimumRequired } = req.body;
     if (!['Verified', 'Rejected'].includes(approvalStatus)) {
       return res.status(400).json(apiResponse(400, false, "Invalid approval status. Must be 'Verified' or 'Rejected'."));
     }
@@ -13,6 +13,9 @@ exports.verifyProduct = async (req, res) => {
       return res.status(404).json(apiResponse(404, false, "Product not found"));
     }
     product.approvalStatus = approvalStatus;
+    if (minimumRequired !== undefined) {
+      product.minimumRequired = minimumRequired;
+    }
     await product.save();
     return res.status(200).json(apiResponse(200, true, `Product ${approvalStatus.toLowerCase()} successfully`, { product }));
   } catch (error) {
