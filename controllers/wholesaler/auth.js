@@ -8,21 +8,13 @@ const mongoose = require("mongoose");
 
 exports.signupWholesaler = async (req, res) => {
   try {
-    const { name, phoneNumber, email, otp } = req.body;
+    const { phoneNumber, otp } = req.body;
 
     // Validate required fields
-    if (!name || !phoneNumber || !email || !otp) {
+    if (!phoneNumber || !otp) {
       return res
         .status(400)
-        .json(apiResponse(400, false, "Name, phone number, email, and OTP are required"));
-    }
-
-    // Validate name (basic: alphanumeric and spaces, 2-50 characters)
-    const nameRegex = /^[a-zA-Z\s]{2,50}$/;
-    if (!nameRegex.test(name)) {
-      return res
-        .status(400)
-        .json(apiResponse(400, false, "Invalid name format (2-50 characters, letters and spaces only)"));
+        .json(apiResponse(400, false, "Phone number and OTP are required"));
     }
 
     // Validate phone number (10 digits)
@@ -31,14 +23,6 @@ exports.signupWholesaler = async (req, res) => {
       return res
         .status(400)
         .json(apiResponse(400, false, "Phone number must be 10 digits"));
-    }
-
-    // Validate email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res
-        .status(400)
-        .json(apiResponse(400, false, "Invalid email format"));
     }
 
     // Fetch OTP record
@@ -90,9 +74,7 @@ exports.signupWholesaler = async (req, res) => {
 
     // Create new wholesaler
     wholesaler = new Auth({
-      name,
       phoneNumber: phoneNumber,
-      email: email,
       isPhoneVerified: true,
       role: "Wholesaler",
     });
@@ -120,7 +102,7 @@ exports.signupWholesaler = async (req, res) => {
     if (error.code === 11000) {
       return res
         .status(400)
-        .json(apiResponse(400, false, "Phone number or email already exists"));
+        .json(apiResponse(400, false, "Phone number already exists"));
     }
     return res
       .status(500)
@@ -283,15 +265,79 @@ exports.kycVerification = async (req, res) => {
   try {
     const { wholesalerId } = req.params;
     const {
+      apmcRegion,
+      businessName,
+      businessHours: businessHoursString,
+      gstNumber,
       businessType,
-      businessAddress, // should be an object with shopNumber, street, city, state, pincode
-      location, // should be an object with latitude, longitude
+      businessAddress,
+      location,
       upiId,
       accountHolderName,
       accountNumber,
       ifscCode,
       bankName,
     } = req.body;
+
+    // Correctly access files from multer.fields
+    const businessCertificateFile = req.file || req.files?.businessCertificate?.[0];
+    const idProofFile = req.files?.idProof?.[0];
+    const businessRegistrationFile = req.files?.businessRegistration?.[0];
+
+    // Validate wholesalerId
+    if (!mongoose.Types.ObjectId.isValid(wholesalerId)) {
+      return res.status(400).json(apiResponse(400, false, "Invalid wholesaler ID"));
+    }
+
+    // Hardcoded allowed APMC regions (to be replaced with DB/config fetch in future)
+    const allowedApmcRegions = ["Mumbai APMC", "Delhi APMC", "Pune APMC"];
+
+    // Validate required shop profile fields
+    if (
+      !businessHoursString ||
+      !gstNumber ||
+      !businessCertificateFile ||
+      !apmcRegion ||
+      !businessName
+    ) {
+      return res.status(400).json(apiResponse(400, false, "All shop profile fields and business certificate file are required"));
+    }
+
+    // Validate apmcRegion against allowed list
+    if (!allowedApmcRegions.includes(apmcRegion)) {
+      return res.status(400).json(apiResponse(400, false, "Invalid APMC region selected"));
+    }
+
+    // Parse and validate businessHours
+    let businessHours;
+    try {
+      businessHours = JSON.parse(businessHoursString);
+    } catch (parseError) {
+      return res.status(400).json(apiResponse(400, false, "Invalid business hours format: must be a valid JSON string"));
+    }
+
+    // Validate businessHours structure and format
+    const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
+    if (
+      !businessHours.monToSat ||
+      !businessHours.monToSat.open ||
+      !businessHours.monToSat.close ||
+      !businessHours.sunday ||
+      !businessHours.sunday.open ||
+      !businessHours.sunday.close ||
+      !timeRegex.test(businessHours.monToSat.open) ||
+      !timeRegex.test(businessHours.monToSat.close) ||
+      !timeRegex.test(businessHours.sunday.open) ||
+      !timeRegex.test(businessHours.sunday.close)
+    ) {
+      return res.status(400).json(apiResponse(400, false, "Invalid business hours format (e.g., '08:00 AM')"));
+    }
+
+    // Validate GST number (Indian GST: 15 characters)
+    const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+    if (!gstRegex.test(gstNumber)) {
+      return res.status(400).json(apiResponse(400, false, "Invalid GST number format"));
+    }
 
     // Parse businessAddress and location if they are strings
     let parsedBusinessAddress = businessAddress;
@@ -311,17 +357,43 @@ exports.kycVerification = async (req, res) => {
       }
     }
 
-    // Correctly access files from multer.fields
-    const idProofFile = req.files?.idProof?.[0];
-    const businessRegistrationFile = req.files?.businessRegistration?.[0];
-
-    // Find shop profile
-    let shopProfile = await WholesalerProfile.findOne({ wholesalerId });
-    if (!shopProfile) {
-      return res.status(404).json(apiResponse(404, false, "Shop profile not found"));
+    // Find wholesaler
+    const wholesaler = await Auth.findOne({ _id: wholesalerId, role: "Wholesaler" });
+    if (!wholesaler) {
+      return res.status(404).json(apiResponse(404, false, "Wholesaler not found"));
     }
 
-    // Update fields if provided
+    if (!wholesaler.isPhoneVerified) {
+      return res.status(403).json(apiResponse(403, false, "Phone number not verified"));
+    }
+
+    // Find or create shop profile
+    let shopProfile = await WholesalerProfile.findOne({ wholesalerId });
+    if (!shopProfile) {
+      shopProfile = new WholesalerProfile({ wholesalerId });
+    }
+
+    // Check if shop profile already exists
+    if (wholesaler.hasShopDetail) {
+      return res.status(400).json(apiResponse(400, false, "Shop profile already created"));
+    }
+
+    // Upload business certificate to S3
+    let businessCertificateUrl;
+    try {
+      businessCertificateUrl = await uploadImageOrPdf(businessCertificateFile, "business-certificates");
+    } catch (uploadError) {
+      return res.status(400).json(apiResponse(400, false, `Failed to upload business certificate: ${uploadError.message}`));
+    }
+
+    // Update shop profile with all details
+    shopProfile.apmcRegion = apmcRegion;
+    shopProfile.businessName = businessName;
+    shopProfile.businessHours = businessHours;
+    shopProfile.gstNumber = gstNumber;
+    shopProfile.businessCertificate = businessCertificateUrl;
+
+    // Update KYC fields if provided
     if (businessType) shopProfile.businessType = businessType;
     if (parsedBusinessAddress) shopProfile.businessAddress = parsedBusinessAddress;
     if (parsedLocation) shopProfile.location = parsedLocation;
@@ -331,7 +403,7 @@ exports.kycVerification = async (req, res) => {
     if (ifscCode) shopProfile.ifscCode = ifscCode;
     if (bankName) shopProfile.bankName = bankName;
 
-    // Handle file uploads
+    // Handle additional file uploads
     if (idProofFile) {
       shopProfile.idProof = await uploadImageOrPdf(idProofFile, "id-proofs");
     }
@@ -339,12 +411,20 @@ exports.kycVerification = async (req, res) => {
       shopProfile.businessRegistration = await uploadImageOrPdf(businessRegistrationFile, "business-registrations");
     }
 
+    // Save updated profile
     await shopProfile.save();
 
-    return res.status(200).json(apiResponse(200, true, "KYC details updated successfully", { shopProfile }));
+    // Update Auth model
+    wholesaler.hasShopDetail = true;
+    await wholesaler.save();
+
+    return res.status(201).json(apiResponse(201, true, "KYC verification and shop profile updated successfully, awaiting admin verification", { shopProfile }));
   } catch (error) {
     console.log("Error in kycVerification:", error.message);
-    return res.status(500).json(apiResponse(500, false, "Failed to update KYC details"));
+    if (error.code === 11000) {
+      return res.status(400).json(apiResponse(400, false, "GST number already exists"));
+    }
+    return res.status(500).json(apiResponse(500, false, "Failed to update KYC verification and shop profile"));
   }
 };
 
