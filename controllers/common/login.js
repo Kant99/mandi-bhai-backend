@@ -71,11 +71,9 @@ exports.login = async (req, res) => {
       // Create JWT payload
       const payload = {
         id: user._id,
-        name: user.name,
-        phoneNumber: user.phoneNumber,
-        email: user.email,
         role: user.role,
         isActive: user.isActive,
+        phoneNumber: user.phoneNumber,
       };
 
       // Generate JWT token
@@ -124,20 +122,12 @@ exports.login = async (req, res) => {
           .json(apiResponse(400, false, "Shop profile not found"));
       }
 
-      if (!shopProfile.isWholesalerVerified) {
-        return res
-          .status(403)
-          .json(apiResponse(403, false, "Wholesaler not verified by admin"));
-      }
-
       // Create JWT payload
       const payload = {
         id: user._id,
-        name: user.name,
-        phoneNumber: user.phoneNumber,
-        email: user.email,
         role: user.role,
         isActive: user.isActive,
+        phoneNumber: user.phoneNumber,
       };
 
       // Generate JWT token

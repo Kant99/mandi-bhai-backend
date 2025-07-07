@@ -55,8 +55,7 @@ const WholesalerProfileSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    businessCertificate: {
-      // URL link
+    addressProof: {
       type: String,
     },
     kycStatus: {

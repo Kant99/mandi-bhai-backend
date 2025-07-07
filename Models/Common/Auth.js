@@ -2,22 +2,6 @@ const mongoose = require("mongoose");
 
 const AuthSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      trim: true,
-      required: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    isEmailVerified: {
-      type: Boolean,
-      default: false,
-    },
     phoneNumber: {
       type: String,
       required: true,

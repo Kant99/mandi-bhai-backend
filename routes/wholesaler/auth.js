@@ -3,8 +3,12 @@ const router = express.Router();
 const multer = require("multer");
 
 // Controllers
-const { signupWholesaler ,createShopProfile, kycVerification } = require("../../controllers/wholesaler/auth");
-
+const {
+  signupWholesaler,
+  kycProfileDetails,
+  kycDocumentsUpload,
+  kycAccountDetails
+} = require("../../controllers/wholesaler/auth");
 
 // Multer setup for file uploads
 const upload = multer({
@@ -14,20 +18,25 @@ const upload = multer({
 
 // Routes
 
-// Wholesaler signup (name, phone, email, OTP)
+// Wholesaler signup ( phone, OTP)
 router.post("/signup", signupWholesaler);
 
-// Create wholesaler shop profile (with business certificate file upload)
-router.post("/create-shop-profile/:wholesalerId", upload.single("businessCertificate"), createShopProfile);
+// KYC Step 1: Profile Details
+router.post("/kyc/profile", kycProfileDetails);
 
-// KYC Verification route (with file upload)
-router.patch(
-  "/:wholesalerId/kyc-verification",
+// KYC Step 2: Documents Upload
+router.post(
+  "/kyc/documents",
   upload.fields([
     { name: "idProof", maxCount: 1 },
     { name: "businessRegistration", maxCount: 1 },
+    { name: "addressProof", maxCount: 1 }
   ]),
-  kycVerification
+  kycDocumentsUpload
 );
+
+// KYC Step 3: Account Details
+router.post("/kyc/account", kycAccountDetails);
+
 
 module.exports = router;
