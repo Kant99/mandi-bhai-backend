@@ -15,7 +15,6 @@ exports.createProduct = async (req, res) => {
       productDescription,
       stock,
       filters,
-      minimumRequired,
       gstCategory,
       gstPercent,
       priceBeforeGst
@@ -29,19 +28,11 @@ exports.createProduct = async (req, res) => {
       !categoryName ||
       !stock ||
       !productImageFile ||
-      minimumRequired === undefined ||
       !gstCategory || priceBeforeGst === undefined
     ) {
       return res
         .status(400)
-        .json(apiResponse(400, false, "Product name, price unit, category, stock, minimum required, GST category, price before GST, and image are required"));
-    }
-
-    // Validate minimumRequired (non-negative integer)
-    if (!Number.isInteger(Number(minimumRequired)) || minimumRequired < 0) {
-      return res
-        .status(400)
-        .json(apiResponse(400, false, "Minimum required must be a non-negative integer"));
+        .json(apiResponse(400, false, "Product name, price unit, category, stock, GST category, price before GST, and image are required"));
     }
 
     // Validate productName (2-100 characters, alphanumeric and spaces)
@@ -172,7 +163,6 @@ exports.createProduct = async (req, res) => {
       priceUnit,
       lastPriceUpdate: new Date(),
       stock: Number(stock),
-      minimumRequired: Number(minimumRequired),
       filters: parsedFilters,
       approvalStatus: 'Pending',
     });
@@ -276,7 +266,6 @@ exports.updateProduct = async (req, res) => {
       productDescription,
       stock,
       filters,
-      minimumRequired,
       gstCategory,
       gstPercent,
       priceBeforeGst
@@ -367,15 +356,6 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    // Validate and update minimumRequired if provided
-    if (minimumRequired !== undefined) {
-      if (!Number.isInteger(Number(minimumRequired)) || minimumRequired < 0) {
-        return res
-          .status(400)
-          .json(apiResponse(400, false, "Minimum required must be a non-negative integer"));
-      }
-      product.minimumRequired = Number(minimumRequired);
-    }
 
     // Validate and update GST category and percent if provided
     if (gstCategory) {
