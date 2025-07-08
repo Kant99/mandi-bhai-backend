@@ -7,6 +7,7 @@ const { apiResponse } = require("../../utils/apiResponse");
 exports.login = async (req, res) => {
   try {
     const { phoneNumber, otp } = req.body;
+    console.log("recieved phoneNumber and otp", phoneNumber, otp , "from login");
 
     // Validate required fields
     if (!phoneNumber || !otp) {
@@ -25,6 +26,7 @@ exports.login = async (req, res) => {
 
     // Fetch OTP record
     const otpRecord = await PhoneOtp.findOne({ phoneNumber }).sort({ createdAt: -1 });
+    console.log("Fetched OTP record for", phoneNumber, ":", otpRecord);
 
     if (!otpRecord) {
       return res
@@ -33,7 +35,7 @@ exports.login = async (req, res) => {
     }
 
     // Verify OTP
-    if (otpRecord.otp !== otp) {
+    if (String(otpRecord.otp) !== String(otp)) {
       return res.status(401).json(apiResponse(401, false, "Invalid OTP"));
     }
 
@@ -60,73 +62,14 @@ exports.login = async (req, res) => {
         .json(apiResponse(403, false, "Phone number not verified"));
     }
 
-    // Handle Retailer login
-    if (user.role === "Retailer") {
-      if (!user.isActive) {
-        return res
-          .status(403)
-          .json(apiResponse(403, false, "Retailer account is not active"));
-      }
-
-      // Create JWT payload
-      const payload = {
-        id: user._id,
-        role: user.role,
-        isActive: user.isActive,
-        phoneNumber: user.phoneNumber,
-      };
-
-      // Generate JWT token
-      const token = jwt.sign(
-        payload,
-        process.env.JWT_SECRET || "your_jwt_secret",
-        { expiresIn: "7d" }
-      );
-
-      // Set token in Authorization header
-      res.set("Authorization", `Bearer ${token}`);
-
-      // Remove OTP record
-      await PhoneOtp.deleteOne({ phoneNumber });
-
-      return res
-        .status(200)
-        .json(
-          apiResponse(200, true, "Retailer logged in successfully", {
-            user,
-            token,
-          })
-        );
-    }
+    
 
     // Handle Wholesaler login
     if (user.role === "Wholesaler") {
-      if (!user.isActive) {
-        return res
-          .status(403)
-          .json(apiResponse(403, false, "Wholesaler account is not active"));
-      }
-
-      if (!user.hasShopDetail) {
-        return res
-          .status(400)
-          .json(apiResponse(400, false, "Shop profile not created"));
-      }
-
-      // Find wholesaler profile
-      const shopProfile = await WholesalerProfile.findOne({ wholesalerId: user._id });
-
-      if (!shopProfile) {
-        return res
-          .status(400)
-          .json(apiResponse(400, false, "Shop profile not found"));
-      }
-
       // Create JWT payload
       const payload = {
         id: user._id,
         role: user.role,
-        isActive: user.isActive,
         phoneNumber: user.phoneNumber,
       };
 
@@ -148,7 +91,6 @@ exports.login = async (req, res) => {
         .json(
           apiResponse(200, true, "Wholesaler logged in successfully", {
             user,
-            shopProfile,
             token,
           })
         );
