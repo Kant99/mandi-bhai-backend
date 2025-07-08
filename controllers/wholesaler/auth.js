@@ -10,7 +10,7 @@ const jwt = require("jsonwebtoken");
 exports.signupWholesaler = async (req, res) => {
   try {
     const { phoneNumber, otp } = req.body;
-
+    console.log("recieved phoneNumber and otp", phoneNumber, otp , "from signupWholesaler");
     // Validate required fields
     if (!phoneNumber || !otp) {
       return res
@@ -36,7 +36,7 @@ exports.signupWholesaler = async (req, res) => {
     }
 
     // Verify OTP
-    if (otpRecord.otp !== otp) {
+    if (String(otpRecord.otp) !== String(otp)) {
       return res.status(401).json(apiResponse(401, false, "Invalid OTP"));
     }
 
@@ -99,6 +99,9 @@ exports.signupWholesaler = async (req, res) => {
       process.env.JWT_SECRET || "your_jwt_secret",
       { expiresIn: "7d" }
     );
+    res.set("Authorization", `Bearer ${token}`);
+    // Remove OTP record
+    await PhoneOtp.deleteOne({ phoneNumber });
 
     return res
       .status(201)

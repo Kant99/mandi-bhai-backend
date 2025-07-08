@@ -7,8 +7,6 @@ const { apiResponse } = require("../../utils/apiResponse");
 exports.login = async (req, res) => {
   try {
     const { phoneNumber, otp } = req.body;
-    console.log("recieved phoneNumber and otp", phoneNumber, otp , "from login");
-
     // Validate required fields
     if (!phoneNumber || !otp) {
       return res
@@ -26,7 +24,6 @@ exports.login = async (req, res) => {
 
     // Fetch OTP record
     const otpRecord = await PhoneOtp.findOne({ phoneNumber }).sort({ createdAt: -1 });
-    console.log("Fetched OTP record for", phoneNumber, ":", otpRecord);
 
     if (!otpRecord) {
       return res
@@ -70,6 +67,7 @@ exports.login = async (req, res) => {
       const payload = {
         id: user._id,
         role: user.role,
+        isActive: user.isActive,
         phoneNumber: user.phoneNumber,
       };
 
