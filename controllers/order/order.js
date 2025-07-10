@@ -1,13 +1,15 @@
+const mongoose = require('mongoose');
 const Order = require('../../Models/Common/Order');
-const { apiResponse } = require('../../utils/apiResponse');
+const Product = require('../../Models/Product/Product'); // Import Product model
 const RetailerProfile = require('../../Models/Retailer/Profile');
-
+const { apiResponse } = require('../../utils/apiResponse');
 
 exports.getAllOrdersForWholesaler = async (req, res) => {
   try {
     const wholesalerId = req.user.id;
     const orders = await Order.find({ wholesalerId })
-      .populate('retailerId', 'name phoneNumber address')
+      .populate('retailerId', 'name phoneNumber address avatar')
+      .populate('products.productId', 'productName productImage priceAfterGst') // Populate product details
       .sort({ createdAt: -1 });
     if (orders.length === 0) {
       return res.status(404).json(apiResponse(404, false, 'No orders found for this wholesaler'));
@@ -19,15 +21,13 @@ exports.getAllOrdersForWholesaler = async (req, res) => {
   }
 };
 
-/**
- * Get a single order by ID (wholesaler can only access their own orders)
- */
 exports.getOrderByIdForWholesaler = async (req, res) => {
   try {
     const wholesalerId = req.user.id;
     const { orderId } = req.params;
     const order = await Order.findOne({ _id: orderId, wholesalerId })
-      .populate('retailerId', 'name phoneNumber address');
+      .populate('retailerId', 'name phoneNumber address avatar')
+      .populate('products.productId', 'productName productImage priceAfterGst');
     if (!order) {
       return res.status(404).json(apiResponse(404, false, 'Order not found'));
     }
@@ -38,25 +38,18 @@ exports.getOrderByIdForWholesaler = async (req, res) => {
   }
 };
 
-/**
- * Update order status (confirm, dispatch, deliver, reject, cancel) - wholesaler only for their orders
- */
 exports.updateOrderStatusForWholesaler = async (req, res) => {
   try {
     const wholesalerId = req.user.id;
     const { orderId } = req.params;
     const { status, cancellationReason, notes } = req.body;
-    const validStatuses = [
-      'confirmed',
-      'dispatched',
-      'delivered',
-      'cancelled',
-      'rejected'
-    ];
+    const validStatuses = ['confirmed', 'dispatched', 'delivered', 'cancelled', 'rejected'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json(apiResponse(400, false, 'Invalid status update'));
     }
-    const order = await Order.findOne({ _id: orderId, wholesalerId });
+    const order = await Order.findOne({ _id: orderId, wholesalerId })
+      .populate('retailerId', 'name phoneNumber address avatar')
+      .populate('products.productId', 'productName productImage priceAfterGst');
     if (!order) {
       return res.status(404).json(apiResponse(404, false, 'Order not found'));
     }
@@ -71,12 +64,6 @@ exports.updateOrderStatusForWholesaler = async (req, res) => {
   }
 };
 
-
-
-/**
- * Create a new order (for testing/admin; typically, retailers create orders)
- * Now supports vehicleNumber
- */
 exports.createOrderForWholesaler = async (req, res) => {
   try {
     const wholesalerId = req.user.id;
@@ -90,31 +77,66 @@ exports.createOrderForWholesaler = async (req, res) => {
       notes,
       vehicleNumber
     } = req.body;
-    if (!retailerId || !products || !deliveryAddress) {
+
+    // Validate required fields
+    if (!retailerId || !products || !products.length || !deliveryAddress || !orderTotal) {
       return res.status(400).json(apiResponse(400, false, 'Missing required fields'));
     }
+
+    // Validate retailerId
+    const retailer = await RetailerProfile.findById(retailerId);
+    if (!retailer) {
+      return res.status(400).json(apiResponse(400, false, 'Invalid retailerId'));
+    }
+
+    // Validate products and calculate total
+    let calculatedTotal = 0;
+    const validatedProducts = [];
+    for (const product of products) {
+      if (!product.productId || !product.quantity || product.quantity < 1) {
+        return res.status(400).json(apiResponse(400, false, 'Invalid product data'));
+      }
+      const productDoc = await Product.findById(product.productId);
+      if (!productDoc) {
+        return res.status(400).json(apiResponse(400, false, `Product not found: ${product.productId}`));
+      }
+      const productTotal = productDoc.priceAfterGst * product.quantity;
+      validatedProducts.push({
+        productId: product.productId,
+        quantity: product.quantity,
+        total: productTotal
+      });
+      calculatedTotal += productTotal;
+    }
+
+    // Validate orderTotal
+    if (calculatedTotal !== orderTotal) {
+      return res.status(400).json(apiResponse(400, false, 'Order total does not match calculated total'));
+    }
+
     const order = new Order({
       wholesalerId,
       retailerId,
-      products,
+      products: validatedProducts,
       deliveryAddress,
-      deliveryDate,
+      deliveryDate: deliveryDate ? new Date(deliveryDate) : undefined,
       orderTotal,
       paymentMethod: paymentMethod || 'cod',
       notes,
       vehicleNumber
     });
+
     await order.save();
-    return res.status(201).json(apiResponse(201, true, 'Order created successfully', { order }));
+    const populatedOrder = await Order.findById(order._id)
+      .populate('retailerId', 'name phoneNumber address avatar')
+      .populate('products.productId', 'productName productImage priceAfterGst');
+    return res.status(201).json(apiResponse(201, true, 'Order created successfully', { order: populatedOrder }));
   } catch (error) {
     console.log('Error in createOrderForWholesaler:', error.message);
     return res.status(500).json(apiResponse(500, false, 'Failed to create order'));
   }
 };
 
-/**
- * Search/filter orders for wholesaler (by status, date, retailer, payment method, order amount, vehicle number, etc.)
- */
 exports.searchOrdersForWholesaler = async (req, res) => {
   try {
     const wholesalerId = req.user.id;
@@ -131,14 +153,14 @@ exports.searchOrdersForWholesaler = async (req, res) => {
 
     const query = { wholesalerId };
 
-    // Case-insensitive search for status
     if (status) {
-      query.status = { $regex: new RegExp(`^${status}$`, 'i') }; // exact match, case-insensitive
+      query.status = { $regex: new RegExp(`^${status}$`, 'i') };
     }
 
-    if (retailerId) query.retailerId = retailerId;
+    if (retailerId) {
+      query.retailerId = retailerId;
+    }
 
-    // Filter by date range with validation
     if (fromDate || toDate) {
       query.createdAt = {};
       if (fromDate) {
@@ -154,39 +176,31 @@ exports.searchOrdersForWholesaler = async (req, res) => {
       if (Object.keys(query.createdAt).length === 0) delete query.createdAt;
     }
 
-    // Filter by order amount
     if (minTotal || maxTotal) {
       query.orderTotal = {};
       if (minTotal) query.orderTotal.$gte = Number(minTotal);
       if (maxTotal) query.orderTotal.$lte = Number(maxTotal);
     }
 
-    // Case-insensitive search for payment method
     if (paymentMethod) {
       query.paymentMethod = { $regex: new RegExp(`^${paymentMethod}$`, 'i') };
     }
 
-    // Case-insensitive search for vehicle number
     if (vehicleNumber) {
-      query.vehicleNumber = { $regex: new RegExp(vehicleNumber, 'i') }; // partial match, case-insensitive
+      query.vehicleNumber = { $regex: new RegExp(vehicleNumber, 'i') };
     }
 
     console.log("Final MongoDB Query:", query);
 
     const orders = await Order.find(query)
-      .populate("retailerId", "name phoneNumber address")
+      .populate('retailerId', 'name phoneNumber address avatar')
+      .populate('products.productId', 'productName productImage priceAfterGst')
       .sort({ createdAt: -1 });
 
     console.log("Orders found:", orders.length);
-    return res
-      .status(200)
-      .json(apiResponse(200, true, "Orders retrieved successfully", { orders }));
+    return res.status(200).json(apiResponse(200, true, 'Orders retrieved successfully', { orders }));
   } catch (error) {
-    console.log("Error in searchOrdersForWholesaler:", error.message);
-    return res
-      .status(500)
-      .json(apiResponse(500, false, "Failed to search orders"));
+    console.log('Error in searchOrdersForWholesaler:', error.message);
+    return res.status(500).json(apiResponse(500, false, 'Failed to search orders'));
   }
 };
-
-

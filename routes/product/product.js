@@ -27,6 +27,13 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
+router.put(
+  "/:productId",
+  verifyToken,
+  isWholesaler,
+  upload.single("productImage"),
+  updateProduct
+);
 
 // Create a new product (wholesaler only)
 router.post(
@@ -51,13 +58,6 @@ router.get("/verified", verifyToken, isWholesaler, getVerifiedProducts);
 router.get("/rejected", verifyToken, isWholesaler, getRejectedProducts);
 
 // Update a product (wholesaler only, must be owner)
-router.put(
-  "/:productId",
-  verifyToken,
-  isWholesaler,
-  upload.single("productImage"),
-  updateProduct
-);
 
 // Delete a product (wholesaler only, must be owner)
 router.delete("/:productId", verifyToken, isWholesaler, deleteProduct);

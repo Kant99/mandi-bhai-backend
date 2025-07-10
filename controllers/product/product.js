@@ -188,31 +188,39 @@ exports.createProduct = async (req, res) => {
 
 exports.getAllProducts = async (req, res) => {
   try {
+    console.log("📥 getAllProducts called");
+
     // Use wholesalerId from req.user
     const wholesalerId = req.user.id;
+    console.log("🆔 Extracted wholesalerId from req.user:", wholesalerId);
 
     // Fetch all products for the wholesaler
-    const products = await Product.find({ wholesalerId:wholesalerId })
+    const products = await Product.find({ wholesalerId: wholesalerId })
       .populate("wholesalerId", "name")
       .sort({ createdAt: -1 });
 
+    console.log("📦 Products fetched from DB:", products.length, "products found");
+
     // Check if products exist
     if (products.length === 0) {
+      console.log("⚠️ No products found for wholesaler:", wholesalerId);
       return res
         .status(404)
         .json(apiResponse(404, false, "No products found for this wholesaler"));
     }
 
+    console.log("✅ Returning product list");
     return res
       .status(200)
       .json(apiResponse(200, true, "Products retrieved successfully", { products }));
   } catch (error) {
-    console.log("Error in getAllProducts:", error.message);
+    console.log("❌ Error in getAllProducts:", error.message);
     return res
       .status(500)
       .json(apiResponse(500, false, "Failed to retrieve products"));
   }
 };
+
 
 exports.getPendingProducts = async (req, res) => {
   try {
@@ -256,9 +264,13 @@ exports.getRejectedProducts = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const wholesalerId=req.user.id;
-    console.log(productId);
-    console.log(req.body)
+    const wholesalerId = req.user.id;
+
+    console.log("Incoming update request for Product ID:", productId);
+    console.log("Wholesaler ID:", wholesalerId);
+    console.log("Request Body:", req.body);
+    console.log("File Info:", req.file);
+
     const {
       productName,
       priceUnit,
@@ -272,25 +284,26 @@ exports.updateProduct = async (req, res) => {
     } = req.body;
     const productImageFile = req.file;
 
-    // Find product
     const product = await Product.findById(productId);
     if (!product) {
+      console.log("Product not found in DB");
       return res
         .status(404)
         .json(apiResponse(404, false, "Product not found"));
     }
 
-    // Check ownership
     if (product.wholesalerId.toString() !== wholesalerId.toString()) {
+      console.log("Unauthorized attempt to update product");
       return res
         .status(403)
         .json(apiResponse(403, false, "Unauthorized: You can only update your own products"));
     }
 
-    // Validate fields if provided
+    // Validate and update fields
     if (productName) {
       const nameRegex = /^[a-zA-Z0-9\s]{2,100}$/;
       if (!nameRegex.test(productName)) {
+        console.log("Invalid product name format");
         return res
           .status(400)
           .json(apiResponse(400, false, "Invalid product name (2-100 characters, alphanumeric and spaces)"));
@@ -301,17 +314,18 @@ exports.updateProduct = async (req, res) => {
     if (priceUnit) {
       const validUnits = ["per kg", "per dozen", "per piece"];
       if (!validUnits.includes(priceUnit)) {
+        console.log("Invalid price unit:", priceUnit);
         return res
           .status(400)
           .json(apiResponse(400, false, "Price unit must be 'per kg', 'per dozen', or 'per piece'"));
       }
-      product.priceBeforeGst = product.priceBeforeGst;
-      product.priceAfterGst = product.priceAfterGst;
+      product.priceUnit = priceUnit;
     }
 
     if (categoryName) {
       const categoryRegex = /^[a-zA-Z0-9\s]{2,50}$/;
       if (!categoryRegex.test(categoryName)) {
+        console.log("Invalid category name:", categoryName);
         return res
           .status(400)
           .json(apiResponse(400, false, "Invalid category name (2-50 characters, alphanumeric and spaces)"));
@@ -325,6 +339,7 @@ exports.updateProduct = async (req, res) => {
 
     if (stock !== undefined) {
       if (!Number.isInteger(Number(stock)) || stock < 0) {
+        console.log("Invalid stock:", stock);
         return res
           .status(400)
           .json(apiResponse(400, false, "Stock must be a non-negative integer"));
@@ -337,38 +352,44 @@ exports.updateProduct = async (req, res) => {
       try {
         parsedFilters = typeof filters === "string" ? JSON.parse(filters) : filters;
         if (!Array.isArray(parsedFilters)) {
+          console.log("Filters is not an array:", parsedFilters);
           return res
             .status(400)
             .json(apiResponse(400, false, "Filters must be an array of key-value pairs"));
         }
+
         for (const filter of parsedFilters) {
           if (!filter.key || !filter.value || typeof filter.key !== "string" || typeof filter.value !== "string") {
+            console.log("Invalid filter entry:", filter);
             return res
               .status(400)
               .json(apiResponse(400, false, "Each filter must have a key and value as strings"));
           }
         }
+
         product.filters = parsedFilters;
       } catch (error) {
+        console.log("Error parsing filters:", error.message);
         return res
           .status(400)
           .json(apiResponse(400, false, "Invalid filters format"));
       }
     }
 
-
-    // Validate and update GST category and percent if provided
     if (gstCategory) {
       const validGstCategories = ["exempted", "applicable"];
       if (!validGstCategories.includes(gstCategory)) {
+        console.log("Invalid GST category:", gstCategory);
         return res
           .status(400)
           .json(apiResponse(400, false, "GST category must be 'exempted' or 'applicable'"));
       }
       product.gstCategory = gstCategory;
     }
+
     if (gstCategory === "applicable") {
       if (gstPercent === undefined || isNaN(gstPercent) || gstPercent < 0 || gstPercent > 100) {
+        console.log("Invalid GST percent:", gstPercent);
         return res
           .status(400)
           .json(apiResponse(400, false, "GST percent must be between 0 and 100 for applicable GST"));
@@ -378,11 +399,11 @@ exports.updateProduct = async (req, res) => {
       product.gstPercent = 0;
     }
 
-    // Update priceBeforeGst and priceAfterGst if provided
     if (priceBeforeGst !== undefined) {
       product.priceBeforeGst = Number(priceBeforeGst);
     }
-    // Recalculate priceAfterGst based on GST logic
+
+    // Recalculate GST-inclusive price
     if (
       product.gstCategory === "exempted" ||
       product.gstPercent === 0
@@ -392,30 +413,33 @@ exports.updateProduct = async (req, res) => {
       product.gstCategory === "applicable" &&
       product.gstPercent > 0
     ) {
-      product.priceAfterGst = product.priceBeforeGst + (product.priceBeforeGst * product.gstPercent / 100);
+      product.priceAfterGst =
+        product.priceBeforeGst + (product.priceBeforeGst * product.gstPercent) / 100;
     }
 
-    // Update product image if provided
     if (productImageFile) {
       try {
+        console.log("Uploading image to S3...");
         const productImageUrl = await uploadImageToS3(productImageFile, "product-images");
         product.productImage = productImageUrl;
+        console.log("Image uploaded:", productImageUrl);
       } catch (uploadError) {
+        console.log("Image upload failed:", uploadError.message);
         return res
           .status(400)
           .json(apiResponse(400, false, `Failed to upload product image: ${uploadError.message}`));
       }
     }
 
-    // Save updated product
+    // Save final updates
     await product.save();
+    console.log("Product updated successfully:", product);
 
     return res
       .status(200)
       .json(apiResponse(200, true, "Product updated successfully", { product }));
   } catch (error) {
-    console.log(error)
-    console.log("Error in updateProduct:", error.message);
+    console.log("Unexpected error in updateProduct:", error);
     if (error.code === 11000) {
       return res
         .status(400)
@@ -426,7 +450,7 @@ exports.updateProduct = async (req, res) => {
       .json(apiResponse(500, false, "Failed to update product"));
   }
 };
-
+ 
 exports.deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
